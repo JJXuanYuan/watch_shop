@@ -64,6 +64,8 @@
 - `deploy/scripts/bootstrap_ubuntu.sh`：Ubuntu 24.04 初始化脚本
 - `deploy/scripts/deploy_prod.sh`：生产部署脚本
 - `deploy/scripts/post_deploy_check.sh`：部署后验收脚本
+- `deploy/scripts/check_offline_prereqs.sh`：本地完整离线前置镜像预检脚本
+- `deploy/scripts/check_offline_prereqs.ps1`：Windows PowerShell 完整离线前置镜像预检脚本
 - `deploy/scripts/build_offline_images.sh`：本地完整离线业务镜像构建脚本
 - `deploy/scripts/build_offline_images.ps1`：Windows PowerShell 完整离线业务镜像构建脚本
 - `deploy/scripts/export_images.sh`：本地完整离线镜像导出脚本
@@ -150,7 +152,37 @@ bash deploy/scripts/deploy_prod.sh
 
 当服务器无法访问 Docker Hub、PyPI 或其他公网依赖时，使用完整离线方案。业务镜像在本地预构建，服务器只做 `docker load` 和 `docker compose up -d`，不再执行 `build`。
 
-### 1. 本地构建业务镜像
+### 1. 完整离线前置条件
+
+本地机器在执行 build/export 之前，必须先具备这些基础镜像：
+
+- `python:3.11.15-slim-bookworm`
+- `nginx:1.27.5-alpine`
+- `mysql:8.0.45`
+- `redis:7.4.8-alpine`
+
+同时：
+
+- 缺少基础镜像时，不允许继续 `build_offline_images`
+- 缺少 `mall_api:offline` 或 `mall_nginx:offline` 时，不允许继续 `export_images`
+
+建议先运行预检脚本。
+
+Linux/macOS:
+
+```bash
+cd /path/to/watch_shop
+bash deploy/scripts/check_offline_prereqs.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\check_offline_prereqs.ps1
+```
+
+### 2. 本地构建业务镜像
 
 Linux/macOS:
 
@@ -171,7 +203,9 @@ powershell -ExecutionPolicy Bypass -File .\deploy\scripts\build_offline_images.p
 - `mall_api:offline`
 - `mall_nginx:offline`
 
-### 2. 本地导出统一离线包
+如果基础镜像缺失，脚本会直接失败并列出缺失镜像，不会再输出 success。
+
+### 3. 本地导出统一离线包
 
 Linux/macOS:
 
@@ -205,14 +239,47 @@ mall_offline_bundle.tar
 - `mall_api:offline` 已包含 `python:3.11.15-slim-bookworm` 的镜像层
 - `mall_nginx:offline` 已包含 `nginx:1.27.5-alpine` 的镜像层
 - 因此完整离线包不需要再额外单独导出 Python 或 Nginx 基础镜像
+- 如果缺少上面任一镜像，导出脚本会直接失败，不会生成不完整 tar
 
-### 3. 上传离线镜像包到服务器
+### 4. 如果本地也无法访问 Docker Hub
+
+不要继续执行 build/export。先在另一台可联网机器上准备基础镜像 tar，再回到本机 `docker load`。
+
+示例：
+
+```bash
+docker pull python:3.11.15-slim-bookworm
+docker pull nginx:1.27.5-alpine
+docker pull mysql:8.0.45
+docker pull redis:7.4.8-alpine
+docker save -o mall_offline_base_images.tar \
+  python:3.11.15-slim-bookworm \
+  nginx:1.27.5-alpine \
+  mysql:8.0.45 \
+  redis:7.4.8-alpine
+```
+
+把 `mall_offline_base_images.tar` 传到当前构建机后执行：
+
+```bash
+docker load -i mall_offline_base_images.tar
+```
+
+然后重新运行：
+
+```bash
+bash deploy/scripts/check_offline_prereqs.sh
+bash deploy/scripts/build_offline_images.sh
+bash deploy/scripts/export_images.sh
+```
+
+### 5. 上传离线镜像包到服务器
 
 ```bash
 scp mall_offline_bundle.tar root@120.53.87.191:/opt/mall/
 ```
 
-### 4. 服务器加载镜像并启动
+### 6. 服务器加载镜像并启动
 
 ```bash
 ssh root@120.53.87.191
@@ -229,7 +296,7 @@ docker compose -f docker-compose.offline.yml up -d
 docker compose -f docker-compose.offline.yml ps
 ```
 
-### 5. 容器内执行迁移和种子
+### 7. 容器内执行迁移和种子
 
 ```bash
 cd /opt/mall
@@ -237,7 +304,7 @@ docker compose -f docker-compose.offline.yml exec -T mall_api alembic upgrade he
 docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
 ```
 
-### 6. 离线部署后验收
+### 8. 离线部署后验收
 
 ```bash
 cd /opt/mall
@@ -421,6 +488,7 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 
 ### 6. 服务器无法从 Docker Hub 拉镜像
 
+- 先在本地执行 `bash deploy/scripts/check_offline_prereqs.sh`
 - 在本地执行 `bash deploy/scripts/build_offline_images.sh`
 - 再执行 `bash deploy/scripts/export_images.sh`
 - 上传 `mall_offline_bundle.tar` 到服务器 `/opt/mall`
@@ -429,6 +497,24 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 
   ```bash
   docker images | grep -E 'mall_api|mall_nginx|mysql|redis'
+  ```
+
+### 7. 本地机器也无法从 Docker Hub 拉基础镜像
+
+- 不要继续执行 `build_offline_images` 或 `export_images`
+- 在另一台可联网机器上先准备：
+  - `python:3.11.15-slim-bookworm`
+  - `nginx:1.27.5-alpine`
+  - `mysql:8.0.45`
+  - `redis:7.4.8-alpine`
+- 把这些基础镜像打成 tar 后传到当前构建机
+- 在当前构建机执行 `docker load -i mall_offline_base_images.tar`
+- 再重新执行：
+
+  ```bash
+  bash deploy/scripts/check_offline_prereqs.sh
+  bash deploy/scripts/build_offline_images.sh
+  bash deploy/scripts/export_images.sh
   ```
 
 ## 当前接口测试方式

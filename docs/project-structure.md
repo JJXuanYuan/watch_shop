@@ -13,7 +13,7 @@
 
 - `deploy/docker`：各服务 Dockerfile，当前包含 API 与 Nginx 生产镜像构建文件。
 - `deploy/nginx`：Nginx 生产配置与欢迎页静态文件。
-- `deploy/scripts`：服务器初始化、生产部署、完整离线镜像构建/导出/加载与部署后检查脚本。
+- `deploy/scripts`：服务器初始化、生产部署、完整离线镜像预检/构建/导出/加载与部署后检查脚本。
 - `deploy/docs`：部署相关文档，当前以腾讯云 Ubuntu 24.04 为主。
 
 ## 根目录文件
