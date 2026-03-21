@@ -1,0 +1,9 @@
+.git
+.gitignore
+**/node_modules
+**/dist
+**/.uni
+**/unpackage
+**/.venv
+**/__pycache__
+

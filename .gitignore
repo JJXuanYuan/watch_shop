@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.uni/
+.hbuilderx/
+unpackage/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+.idea/
+.vscode/
+mysql_data/
+redis_data/
+

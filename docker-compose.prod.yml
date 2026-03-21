@@ -1,0 +1,119 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mall_mysql:
+    image: mysql:8.0
+    container_name: mall_mysql
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env}
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-watch_shop}
+      MYSQL_USER: ${MYSQL_USER:-watch_shop}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-watch_shop_123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_123456}
+    volumes:
+      - mall_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - mall_network
+    logging: *default-logging
+
+  mall_redis:
+    image: redis:7-alpine
+    container_name: mall_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mall_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - mall_network
+    logging: *default-logging
+
+  mall_api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: mall_api
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      APP_NAME: ${API_APP_NAME:-watch-shop-api}
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${API_DEBUG:-false}
+      API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+      SQLALCHEMY_ECHO: ${SQLALCHEMY_ECHO:-false}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-watch_shop}:${MYSQL_PASSWORD:-watch_shop_123}@mall_mysql:3306/${MYSQL_DATABASE:-watch_shop}
+      REDIS_URL: redis://mall_redis:6379/0
+      API_SECRET_KEY: ${API_SECRET_KEY:-change-me}
+    expose:
+      - "8000"
+    depends_on:
+      mall_mysql:
+        condition: service_healthy
+      mall_redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - mall_network
+    logging: *default-logging
+
+  mall_nginx:
+    build:
+      context: .
+      dockerfile: deploy/docker/nginx/Dockerfile
+    container_name: mall_nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      mall_api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - mall_network
+    logging: *default-logging
+
+volumes:
+  mall_mysql_data:
+  mall_redis_data:
+
+networks:
+  mall_network:
+    driver: bridge

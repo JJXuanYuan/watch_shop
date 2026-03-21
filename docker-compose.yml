@@ -1,0 +1,87 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: watch-shop-mysql
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-watch_shop}
+      MYSQL_USER: ${MYSQL_USER:-watch_shop}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-watch_shop_123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_123456}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    container_name: watch-shop-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api/Dockerfile
+    container_name: watch-shop-api
+    restart: unless-stopped
+    environment:
+      APP_NAME: ${API_APP_NAME:-watch-shop-api}
+      APP_ENV: development
+      DEBUG: "true"
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-watch_shop}:${MYSQL_PASSWORD:-watch_shop_123}@mysql:3306/${MYSQL_DATABASE:-watch_shop}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./services/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - mysql
+      - redis
+
+  admin:
+    image: node:20-alpine
+    container_name: watch-shop-admin
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${ADMIN_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${ADMIN_PORT:-5173}:5173"
+    volumes:
+      - ./apps/admin:/app
+      - admin_node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+
+  miniprogram:
+    image: node:20-alpine
+    container_name: watch-shop-miniprogram
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${MINIPROGRAM_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${MINIPROGRAM_H5_PORT:-5174}:5173"
+    volumes:
+      - ./apps/miniprogram:/app
+      - miniprogram_node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev:h5 -- --host 0.0.0.0"
+    depends_on:
+      - api
+
+volumes:
+  mysql_data:
+  redis_data:
+  admin_node_modules:
+  miniprogram_node_modules:
+

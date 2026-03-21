@@ -1,0 +1,22 @@
+{
+  "name": "watch-shop",
+  "appid": "__UNI__WATCH_SHOP",
+  "description": "Watch Shop uni-app scaffold",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true
+  },
+  "h5": {
+    "title": "Watch Shop"
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  }
+}
+

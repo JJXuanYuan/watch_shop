@@ -1,0 +1,19 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "Watch Shop",
+        "navigationBarBackgroundColor": "#F6EFE3",
+        "navigationBarTextStyle": "black"
+      }
+    }
+  ],
+  "globalStyle": {
+    "backgroundColor": "#F6EFE3",
+    "navigationBarBackgroundColor": "#F6EFE3",
+    "navigationBarTitleText": "Watch Shop",
+    "navigationBarTextStyle": "black"
+  }
+}
+
