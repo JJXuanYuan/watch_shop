@@ -7,7 +7,8 @@
 - 服务器：`120.53.87.191`
 - 登录用户：`root`
 - 项目目录：`/opt/mall`
-- 运行方式：只允许 `docker compose -f docker-compose.prod.yml ...`
+- 在线/半离线运行方式：`docker compose -f docker-compose.prod.yml ...`
+- 完整离线运行方式：`docker compose -f docker-compose.offline.yml ...`
 - 迁移和种子：只允许在 `mall_api` 容器内执行
 
 ## 当前阶段范围
@@ -27,6 +28,7 @@
 - Alembic 迁移
 - 商品分类与商品种子数据
 - 面向腾讯云 Ubuntu 24.04 的生产部署脚本
+- 完整离线镜像构建、导出与加载脚本
 
 ## 目录结构
 
@@ -46,6 +48,7 @@
 ├─ .env.example
 ├─ docker-compose.yml
 ├─ docker-compose.prod.yml
+├─ docker-compose.offline.yml
 └─ README.md
 ```
 
@@ -55,11 +58,18 @@
 
 - `services/api/Dockerfile`：API 生产镜像
 - `docker-compose.prod.yml`：生产编排
+- `docker-compose.offline.yml`：完整离线编排
 - `deploy/docker/nginx/Dockerfile`：Nginx 生产镜像
 - `deploy/nginx/mall.api.prod.conf`：Nginx 反向代理配置
 - `deploy/scripts/bootstrap_ubuntu.sh`：Ubuntu 24.04 初始化脚本
 - `deploy/scripts/deploy_prod.sh`：生产部署脚本
 - `deploy/scripts/post_deploy_check.sh`：部署后验收脚本
+- `deploy/scripts/build_offline_images.sh`：本地完整离线业务镜像构建脚本
+- `deploy/scripts/build_offline_images.ps1`：Windows PowerShell 完整离线业务镜像构建脚本
+- `deploy/scripts/export_images.sh`：本地完整离线镜像导出脚本
+- `deploy/scripts/export_images.ps1`：Windows PowerShell 完整离线镜像导出脚本
+- `deploy/scripts/load_images_and_start.sh`：服务器离线镜像加载并启动脚本
+- `deploy/scripts/offline_post_check.sh`：服务器离线部署验收脚本
 - `deploy/docs/ubuntu-setup.md`：腾讯云 Ubuntu 24.04 部署说明
 
 ## 腾讯云服务器部署
@@ -100,12 +110,14 @@ vim .env
 - `API_SECRET_KEY`
 - `NGINX_PORT`
 
-### 3. 启动生产容器
+### 3. 在线或半离线启动生产容器
 
 ```bash
 cd /opt/mall
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+如果服务器无法访问 Docker Hub、PyPI 或其他公网依赖，不要使用这一方式，直接跳到下方“完整离线部署方案（推荐）”。
 
 ### 4. 容器内执行迁移和种子
 
@@ -122,6 +134,8 @@ cd /opt/mall
 bash deploy/scripts/deploy_prod.sh
 ```
 
+该脚本走的是 `docker-compose.prod.yml`，适用于在线或半离线环境。
+
 这个脚本会自动：
 
 - 尝试更新当前代码
@@ -132,20 +146,128 @@ bash deploy/scripts/deploy_prod.sh
 - 在 `mall_api` 容器内执行种子数据写入
 - 输出接口验收地址
 
+## 完整离线部署方案（推荐）
+
+当服务器无法访问 Docker Hub、PyPI 或其他公网依赖时，使用完整离线方案。业务镜像在本地预构建，服务器只做 `docker load` 和 `docker compose up -d`，不再执行 `build`。
+
+### 1. 本地构建业务镜像
+
+Linux/macOS:
+
+```bash
+cd /path/to/watch_shop
+bash deploy/scripts/build_offline_images.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\build_offline_images.ps1
+```
+
+本地会构建：
+
+- `mall_api:offline`
+- `mall_nginx:offline`
+
+### 2. 本地导出统一离线包
+
+Linux/macOS:
+
+```bash
+cd /path/to/watch_shop
+bash deploy/scripts/export_images.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\export_images.ps1
+```
+
+默认会生成：
+
+```text
+mall_offline_bundle.tar
+```
+
+当前离线包包含这些镜像标签：
+
+- `mysql:8.0.45`
+- `redis:7.4.8-alpine`
+- `mall_api:offline`
+- `mall_nginx:offline`
+
+说明：
+
+- `mall_api:offline` 已包含 `python:3.11.15-slim-bookworm` 的镜像层
+- `mall_nginx:offline` 已包含 `nginx:1.27.5-alpine` 的镜像层
+- 因此完整离线包不需要再额外单独导出 Python 或 Nginx 基础镜像
+
+### 3. 上传离线镜像包到服务器
+
+```bash
+scp mall_offline_bundle.tar root@120.53.87.191:/opt/mall/
+```
+
+### 4. 服务器加载镜像并启动
+
+```bash
+ssh root@120.53.87.191
+cd /opt/mall
+bash deploy/scripts/load_images_and_start.sh
+```
+
+也可以手工执行：
+
+```bash
+cd /opt/mall
+docker load -i mall_offline_bundle.tar
+docker compose -f docker-compose.offline.yml up -d
+docker compose -f docker-compose.offline.yml ps
+```
+
+### 5. 容器内执行迁移和种子
+
+```bash
+cd /opt/mall
+docker compose -f docker-compose.offline.yml exec -T mall_api alembic upgrade head
+docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
+```
+
+### 6. 离线部署后验收
+
+```bash
+cd /opt/mall
+bash deploy/scripts/offline_post_check.sh
+```
+
+## 半离线方案（仅兜底）
+
+半离线方案依然使用 `docker-compose.prod.yml`，服务器执行的是：
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+这类方案只适用于服务器还能访问 Docker Hub、PyPI 等公网依赖的场景。它会在服务器端构建 `mall_api` 和 `mall_nginx`，不适合作为默认生产方案。
+
 ## 服务器验收命令
 
 ### 容器状态
 
 ```bash
 cd /opt/mall
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.offline.yml ps
 ```
 
 ### API 日志
 
 ```bash
 cd /opt/mall
-docker compose -f docker-compose.prod.yml logs mall_api --tail=100
+docker compose -f docker-compose.offline.yml logs mall_api --tail=100
 ```
 
 ### 健康检查
@@ -180,12 +302,21 @@ curl http://120.53.87.191/api/v1/products/1
 
 ```bash
 cd /opt/mall
+bash deploy/scripts/offline_post_check.sh
 bash deploy/scripts/post_deploy_check.sh http://120.53.87.191
 ```
 
-## docker-compose.prod.yml 运行说明
+其中：
 
-生产编排包含四个服务：
+- `offline_post_check.sh` 对应 `docker-compose.offline.yml`
+- `post_deploy_check.sh` 对应 `docker-compose.prod.yml`
+
+## Compose 文件说明
+
+- `docker-compose.prod.yml`：在线或半离线编排，服务器会 `build`
+- `docker-compose.offline.yml`：完整离线编排，直接使用 `mall_api:offline` 和 `mall_nginx:offline`
+
+完整离线编排包含四个服务：
 
 - `mall_mysql`
 - `mall_redis`
@@ -203,7 +334,13 @@ bash deploy/scripts/post_deploy_check.sh http://120.53.87.191
 
 ## 容器化迁移与种子命令
 
-### 迁移
+### 完整离线迁移
+
+```bash
+docker compose -f docker-compose.offline.yml exec -T mall_api alembic upgrade head
+```
+
+### 在线或半离线迁移
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T mall_api alembic upgrade head
@@ -212,11 +349,19 @@ docker compose -f docker-compose.prod.yml exec -T mall_api alembic upgrade head
 ### 查看迁移状态
 
 ```bash
+docker compose -f docker-compose.offline.yml exec -T mall_api alembic current
+docker compose -f docker-compose.offline.yml exec -T mall_api alembic history
 docker compose -f docker-compose.prod.yml exec -T mall_api alembic current
 docker compose -f docker-compose.prod.yml exec -T mall_api alembic history
 ```
 
-### 种子数据
+### 完整离线种子数据
+
+```bash
+docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
+```
+
+### 在线或半离线种子数据
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.seed_data
@@ -228,14 +373,14 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 
 - 检查腾讯云安全组是否放通 TCP 80
 - 检查服务器是否有公网 IP
-- 检查 `docker compose -f docker-compose.prod.yml ps`
+- 检查 `docker compose -f docker-compose.offline.yml ps`
 
 ### 2. Nginx 返回 502
 
 - 查看 API 日志：
 
   ```bash
-  docker compose -f docker-compose.prod.yml logs mall_api --tail=100
+  docker compose -f docker-compose.offline.yml logs mall_api --tail=100
   ```
 
 - 确认 `mall_api` 健康状态正常
@@ -246,13 +391,13 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 - 先确认 MySQL 是否健康：
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec -T mall_mysql sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'
+  docker compose -f docker-compose.offline.yml exec -T mall_mysql sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'
   ```
 
 - 再执行迁移：
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec -T mall_api alembic upgrade head
+  docker compose -f docker-compose.offline.yml exec -T mall_api alembic upgrade head
   ```
 
 ### 4. 商品接口返回空数据
@@ -260,7 +405,7 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 - 重新执行种子脚本：
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.seed_data
+  docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
   ```
 
 - 再调用：
@@ -273,6 +418,18 @@ docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.see
 
 - 重新登录 SSH 会话
 - 或临时改用 `sudo docker compose ...`
+
+### 6. 服务器无法从 Docker Hub 拉镜像
+
+- 在本地执行 `bash deploy/scripts/build_offline_images.sh`
+- 再执行 `bash deploy/scripts/export_images.sh`
+- 上传 `mall_offline_bundle.tar` 到服务器 `/opt/mall`
+- 在服务器执行 `bash deploy/scripts/load_images_and_start.sh`
+- 如需确认镜像已加载：
+
+  ```bash
+  docker images | grep -E 'mall_api|mall_nginx|mysql|redis'
+  ```
 
 ## 当前接口测试方式
 

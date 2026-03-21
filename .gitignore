@@ -12,4 +12,5 @@ __pycache__/
 .vscode/
 mysql_data/
 redis_data/
-
+mall_images.tar
+mall_offline_bundle.tar

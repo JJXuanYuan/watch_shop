@@ -7,9 +7,10 @@
 - 服务器公网 IP：`120.53.87.191`
 - 登录用户：`root`
 - 项目目录：`/opt/mall`
-- 运行方式：`docker compose -f docker-compose.prod.yml ...`
-- 迁移方式：`docker compose -f docker-compose.prod.yml exec -T mall_api alembic upgrade head`
-- 种子方式：`docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.seed_data`
+- 在线/半离线运行方式：`docker compose -f docker-compose.prod.yml ...`
+- 完整离线运行方式：`docker compose -f docker-compose.offline.yml ...`
+- 迁移方式：只允许在 `mall_api` 容器内执行
+- 种子方式：只允许在 `mall_api` 容器内执行
 
 ## 1. 服务器前置检查
 
@@ -60,12 +61,14 @@ vim .env
 - `API_SECRET_KEY`
 - `NGINX_PORT`
 
-## 4. 启动生产容器
+## 4. 在线或半离线启动生产容器
 
 ```bash
 cd /opt/mall
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+如果服务器无法访问 Docker Hub、PyPI 或其他公网依赖，不要使用这一方式，直接使用第 7 节“完整离线部署方案（推荐）”。
 
 ## 5. 容器内执行迁移与种子
 
@@ -92,12 +95,126 @@ bash deploy/scripts/deploy_prod.sh
 - 在 `mall_api` 容器内写入种子数据
 - 输出验收地址
 
-## 7. 部署后验收
+## 7. 完整离线部署方案（推荐）
+
+当腾讯云服务器无法访问 Docker Hub、PyPI 或其他公网依赖时，使用完整离线方案。业务镜像在本地预构建，服务器只做 `docker load` 和 `docker compose up -d`，不再执行 `build`。
+
+### 7.1 本地构建业务镜像
+
+Linux/macOS:
+
+```bash
+cd /path/to/watch_shop
+bash deploy/scripts/build_offline_images.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\build_offline_images.ps1
+```
+
+本地会构建：
+
+- `mall_api:offline`
+- `mall_nginx:offline`
+
+### 7.2 本地导出统一离线包
+
+Linux/macOS:
+
+```bash
+cd /path/to/watch_shop
+bash deploy/scripts/export_images.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\export_images.ps1
+```
+
+导出结果默认是：
+
+```text
+mall_offline_bundle.tar
+```
+
+离线包包含：
+
+- `mysql:8.0.45`
+- `redis:7.4.8-alpine`
+- `mall_api:offline`
+- `mall_nginx:offline`
+
+说明：
+
+- `mall_api:offline` 已包含 `python:3.11.15-slim-bookworm` 的镜像层
+- `mall_nginx:offline` 已包含 `nginx:1.27.5-alpine` 的镜像层
+- 所以服务器不需要再从公网拉取 Python 或 Nginx 基础镜像
+
+### 7.3 上传镜像包到服务器
+
+```bash
+scp mall_offline_bundle.tar root@120.53.87.191:/opt/mall/
+```
+
+### 7.4 服务器加载镜像并启动
+
+```bash
+ssh root@120.53.87.191
+cd /opt/mall
+bash deploy/scripts/load_images_and_start.sh
+```
+
+如果你更想手工执行：
 
 ```bash
 cd /opt/mall
+docker load -i mall_offline_bundle.tar
+docker compose -f docker-compose.offline.yml up -d
+docker compose -f docker-compose.offline.yml ps
+```
+
+### 7.5 容器内执行迁移与种子
+
+```bash
+cd /opt/mall
+docker compose -f docker-compose.offline.yml exec -T mall_api alembic upgrade head
+docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
+```
+
+### 7.6 离线部署后验收
+
+```bash
+cd /opt/mall
+bash deploy/scripts/offline_post_check.sh
+```
+
+## 7A. 半离线方案（仅兜底）
+
+半离线方案依然使用 `docker-compose.prod.yml`，服务器执行的是：
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+它仍会在服务器构建 `mall_api` 和 `mall_nginx`，如果服务器不能访问 PyPI 等公网依赖，这条链路会失败，所以只建议在网络受限较少时作为兜底方案。
+
+## 8. 部署后验收
+
+```bash
+cd /opt/mall
+bash deploy/scripts/offline_post_check.sh
 bash deploy/scripts/post_deploy_check.sh http://120.53.87.191
 ```
+
+其中：
+
+- `offline_post_check.sh` 对应 `docker-compose.offline.yml`
+- `post_deploy_check.sh` 对应 `docker-compose.prod.yml`
 
 也可以手工验证：
 
@@ -112,52 +229,52 @@ curl http://120.53.87.191/api/v1/products
 curl http://120.53.87.191/api/v1/products/1
 ```
 
-## 8. 常见故障排查
+## 9. 常见故障排查
 
-### 8.1 访问服务器 IP 超时
+### 9.1 访问服务器 IP 超时
 
 - 检查腾讯云安全组是否放通 TCP 80
 - 检查实例是否绑定公网 IP
-- 检查 `docker compose -f docker-compose.prod.yml ps`
+- 检查 `docker compose -f docker-compose.offline.yml ps`
 
-### 8.2 Nginx 返回 502
+### 9.2 Nginx 返回 502
 
 - 查看 API 容器日志：
 
   ```bash
-  docker compose -f docker-compose.prod.yml logs mall_api --tail=100
+  docker compose -f docker-compose.offline.yml logs mall_api --tail=100
   ```
 
 - 确认 API 容器健康状态：
 
   ```bash
-  docker compose -f docker-compose.prod.yml ps
+  docker compose -f docker-compose.offline.yml ps
   ```
 
 - 确认 Nginx 配置中的 upstream 服务名是 `mall_api`
 
-### 8.3 迁移失败
+### 9.3 迁移失败
 
 - 确认 MySQL 已健康：
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec -T mall_mysql sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'
+  docker compose -f docker-compose.offline.yml exec -T mall_mysql sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'
   ```
 
 - 检查 `.env` 中数据库账号密码是否匹配
 - 查看 API 日志中的 SQLAlchemy / Alembic 报错
 
-### 8.4 种子数据未写入
+### 9.4 种子数据未写入
 
 - 手工重跑：
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec -T mall_api python -m scripts.seed_data
+  docker compose -f docker-compose.offline.yml exec -T mall_api python -m scripts.seed_data
   ```
 
 - 查看分类和商品接口返回是否为空
 
-### 8.5 Docker 命令无权限
+### 9.5 Docker 命令无权限
 
 - 重新登录 SSH，或者暂时使用 `sudo docker ...`
 - 确认当前用户已加入 `docker` 组：
@@ -166,7 +283,28 @@ curl http://120.53.87.191/api/v1/products/1
   groups
   ```
 
-## 9. 后续域名与 HTTPS 预留
+### 9.6 离线镜像加载后仍然报缺少基础镜像
+
+- 检查镜像是否已加载：
+
+  ```bash
+  docker images | grep -E 'mall_api|mall_nginx|mysql|redis'
+  ```
+
+- 重新执行：
+
+  ```bash
+  cd /opt/mall
+  docker load -i mall_offline_bundle.tar
+  ```
+
+- 然后再次启动：
+
+  ```bash
+  docker compose -f docker-compose.offline.yml up -d
+  ```
+
+## 10. 后续域名与 HTTPS 预留
 
 - 当前 Nginx 配置优先支持 `http://服务器IP`
 - 域名就绪后，修改 `deploy/nginx/mall.api.prod.conf` 的 `server_name`
