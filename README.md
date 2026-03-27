@@ -221,6 +221,13 @@ Set-Location C:\Users\JASON_XY\Desktop\watch_shop
 powershell -ExecutionPolicy Bypass -File .\deploy\scripts\export_images.ps1
 ```
 
+也可以显式指定输出文件：
+
+```powershell
+Set-Location C:\Users\JASON_XY\Desktop\watch_shop
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\export_images.ps1 -OutputTar mall_offline_bundle.tar
+```
+
 默认会生成：
 
 ```text

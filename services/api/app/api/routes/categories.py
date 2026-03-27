@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.models.product_category import ProductCategory
+from app.models.types import CategoryStatus
 from app.schemas.category import CategoryItem, CategoryListResponse
 
 router = APIRouter(prefix="/categories", tags=["categories"])
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 def list_categories(db: Session = Depends(get_db)) -> CategoryListResponse:
     statement = (
         select(ProductCategory)
-        .where(ProductCategory.is_active.is_(True))
+        .where(ProductCategory.status == CategoryStatus.ENABLED)
         .order_by(ProductCategory.sort_order.asc(), ProductCategory.id.asc())
     )
     items = db.scalars(statement).all()
@@ -21,4 +22,3 @@ def list_categories(db: Session = Depends(get_db)) -> CategoryListResponse:
     return CategoryListResponse(
         items=[CategoryItem.model_validate(category) for category in items]
     )
-

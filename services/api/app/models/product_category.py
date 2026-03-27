@@ -1,13 +1,15 @@
-from sqlalchemy import Boolean, Index, Integer, String, text
+from sqlalchemy import Enum, Index, Integer, String, text
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
+from app.models.types import CategoryStatus
 
 
 class ProductCategory(TimestampMixin, Base):
     __tablename__ = "product_categories"
     __table_args__ = (
-        Index("ix_product_categories_is_active_sort_order", "is_active", "sort_order"),
+        Index("ix_product_categories_status_sort_order", "status", "sort_order"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -19,11 +21,31 @@ class ProductCategory(TimestampMixin, Base):
         default=0,
         server_default=text("0"),
     )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
+    status: Mapped[CategoryStatus] = mapped_column(
+        Enum(
+            CategoryStatus,
+            name="category_status",
+            native_enum=False,
+            create_constraint=False,
+            length=20,
+        ),
         nullable=False,
-        default=True,
-        server_default=text("1"),
+        default=CategoryStatus.ENABLED,
+        server_default=text("'enabled'"),
     )
 
     products = relationship("Product", back_populates="category")
+
+    @hybrid_property
+    def is_active(self) -> bool:
+        return self.status == CategoryStatus.ENABLED
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self.status = (
+            CategoryStatus.ENABLED if value else CategoryStatus.DISABLED
+        )
+
+    @is_active.expression
+    def is_active(cls):  # type: ignore[no-redef]
+        return cls.status == CategoryStatus.ENABLED

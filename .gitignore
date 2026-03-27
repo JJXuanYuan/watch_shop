@@ -6,6 +6,8 @@ unpackage/
 .venv/
 __pycache__/
 *.pyc
+*.tsbuildinfo
+*.vue.js
 .env
 .DS_Store
 .idea/
@@ -14,3 +16,7 @@ mysql_data/
 redis_data/
 mall_images.tar
 mall_offline_bundle.tar
+services/api/media/
+apps/admin/src/main.js
+apps/admin/vite.config.js
+apps/admin/src/**/*.js

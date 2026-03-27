@@ -28,8 +28,3 @@ class TimestampMixin:
         server_default=func.now(),
         onupdate=func.now(),
     )
-
-
-from app.models.product import Product  # noqa: E402,F401
-from app.models.product_category import ProductCategory  # noqa: E402,F401
-

@@ -23,16 +23,21 @@ function Test-ImageExists {
         [string]$Image
     )
 
-    docker image inspect $Image *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        cmd.exe /c "docker image inspect ""$Image"" 1>nul 2>nul"
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
 }
 
 function Write-ImageGroup {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Title,
-        [Parameter(Mandatory = $true)]
-        [System.Collections.Generic.List[string]]$Images
+        [AllowEmptyCollection()]
+        [string[]]$Images = @()
     )
 
     Write-Host $Title

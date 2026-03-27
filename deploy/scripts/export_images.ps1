@@ -1,8 +1,8 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [string]$OutputTar = "mall_offline_bundle.tar"
 )
+
+$ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\\..")
 
@@ -19,8 +19,13 @@ function Test-ImageExists {
         [string]$Image
     )
 
-    docker image inspect $Image *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        cmd.exe /c "docker image inspect ""$Image"" 1>nul 2>nul"
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
 }
 
 Push-Location $repoRoot

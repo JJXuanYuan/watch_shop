@@ -1,7 +1,14 @@
 <script lang="ts">
+import { ensureUserSession } from "./utils/session";
+
 export default {
   onLaunch() {
-    console.log("Watch Shop miniprogram launched.");
+    void ensureUserSession().catch((error) => {
+      console.warn(
+        "Watch Shop miniprogram login bootstrap failed.",
+        error instanceof Error ? error.message : error,
+      );
+    });
   },
 };
 </script>
@@ -17,4 +24,3 @@ page {
   font-family: "Source Han Sans SC", "Noto Sans SC", sans-serif;
 }
 </style>
-

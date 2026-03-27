@@ -20,7 +20,11 @@ MISSING_BUSINESS=()
 
 check_image() {
   local image="$1"
-  docker image inspect "$image" >/dev/null 2>&1
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
 }
 
 for image in "${BASE_IMAGES[@]}"; do

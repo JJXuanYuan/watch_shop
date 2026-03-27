@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_db
 from app.models.product import Product
 from app.models.product_category import ProductCategory
-from app.models.types import ProductStatus
+from app.models.types import CategoryStatus, ProductStatus
 from app.schemas.product import ProductDetailResponse, ProductListItem, ProductListResponse
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -23,8 +23,9 @@ def list_products(
     db: Session = Depends(get_db),
 ) -> ProductListResponse:
     filters = [
-        Product.status == ProductStatus.ACTIVE,
-        ProductCategory.is_active.is_(True),
+        Product.deleted_at.is_(None),
+        Product.status == ProductStatus.ON_SALE,
+        ProductCategory.status == CategoryStatus.ENABLED,
     ]
 
     if category_id is not None:
@@ -34,7 +35,7 @@ def list_products(
         filters.append(ProductCategory.slug == category_slug.strip())
 
     if keyword:
-        filters.append(Product.title.ilike(f"%{keyword.strip()}%"))
+        filters.append(Product.name.ilike(f"%{keyword.strip()}%"))
 
     count_statement = (
         select(func.count(Product.id))
@@ -49,7 +50,12 @@ def list_products(
         .join(Product.category)
         .options(selectinload(Product.category))
         .where(*filters)
-        .order_by(Product.is_featured.desc(), Product.created_at.desc(), Product.id.desc())
+        .order_by(
+            Product.sort_order.asc(),
+            Product.is_featured.desc(),
+            Product.created_at.desc(),
+            Product.id.desc(),
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -78,8 +84,9 @@ def get_product_detail(
         .options(selectinload(Product.category))
         .where(
             Product.id == product_id,
-            Product.status == ProductStatus.ACTIVE,
-            ProductCategory.is_active.is_(True),
+            Product.deleted_at.is_(None),
+            Product.status == ProductStatus.ON_SALE,
+            ProductCategory.status == CategoryStatus.ENABLED,
         )
     )
     product = db.scalar(statement)
@@ -91,4 +98,3 @@ def get_product_detail(
         )
 
     return ProductDetailResponse.model_validate(product)
-
