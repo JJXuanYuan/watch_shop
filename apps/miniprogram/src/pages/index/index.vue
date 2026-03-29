@@ -2,42 +2,85 @@
 import { computed, ref } from "vue";
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app";
 
-import { fetchCategories, fetchProducts } from "../../api/shop";
+import ProductCard from "../../components/ProductCard.vue";
+import TechImage from "../../components/TechImage.vue";
+import TechSearchBar from "../../components/TechSearchBar.vue";
+import TechTabBar from "../../components/TechTabBar.vue";
+import WechatQrSheet from "../../components/WechatQrSheet.vue";
+import { fetchProducts } from "../../api/shop";
+import { getProductContent } from "../../utils/product-content";
 import { formatPrice, hasPrice } from "../../utils/price";
-import type { CategoryItem, ProductListItem } from "../../types/shop";
+import {
+  STOREFRONT_CHANNELS,
+  type StoreChannelKey,
+} from "../../utils/storefront";
+import type { ProductListItem } from "../../types/shop";
 
-const categories = ref<CategoryItem[]>([]);
-const recommendedProducts = ref<ProductListItem[]>([]);
+const products = ref<ProductListItem[]>([]);
 const loading = ref(false);
 const errorMessage = ref("");
+const searchKeyword = ref("");
+const qrVisible = ref(false);
 
-const quickCategories = computed(() => categories.value.slice(0, 6));
+const bannerProducts = computed(() => products.value.slice(0, 3));
+const hotProducts = computed(() => products.value.slice(0, 2));
+
+function getProductBundle(product: ProductListItem) {
+  return getProductContent(product, product.category);
+}
+
+function getBannerTitle(product: ProductListItem): string {
+  return getProductBundle(product).shortTitle || product.title;
+}
+
+function getBannerSummary(product: ProductListItem): string {
+  return getProductBundle(product).subtitle || product.subtitle || "";
+}
+
+function getBannerImage(product: ProductListItem): string {
+  return getProductBundle(product).heroImage || product.cover_image;
+}
+
+function getBannerImages(product: ProductListItem): string[] {
+  return getProductBundle(product).galleryImages;
+}
+
+function sortProducts(items: ProductListItem[]): ProductListItem[] {
+  return [...items].sort((left, right) => {
+    const leftScore = 30 * Number(left.is_featured) + 12 * left.sales + Math.max(left.stock, 0);
+    const rightScore = 30 * Number(right.is_featured) + 12 * right.sales + Math.max(right.stock, 0);
+
+    if (rightScore !== leftScore) {
+      return rightScore - leftScore;
+    }
+
+    return left.id - right.id;
+  });
+}
 
 async function loadHomeData() {
   loading.value = true;
   errorMessage.value = "";
 
   try {
-    const [categoryResponse, productResponse] = await Promise.all([
-      fetchCategories(),
-      fetchProducts({ page: 1, page_size: 6 }),
-    ]);
-
-    categories.value = categoryResponse.items;
-    recommendedProducts.value = productResponse.items;
+    const productResponse = await fetchProducts({ page: 1, page_size: 18 });
+    products.value = sortProducts(productResponse.items);
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : "首页数据加载失败";
+    errorMessage.value = error instanceof Error ? error.message : "首页数据加载失败";
   } finally {
     loading.value = false;
     uni.stopPullDownRefresh();
   }
 }
 
-function openCategoryPage(categoryId?: number) {
-  const suffix = categoryId ? `?categoryId=${categoryId}` : "";
+function openCategoryPage(channelKey: StoreChannelKey = "modeling", keyword = "") {
+  const query = [`channel=${channelKey}`];
+  if (keyword.trim()) {
+    query.push(`keyword=${encodeURIComponent(keyword.trim())}`);
+  }
+
   uni.navigateTo({
-    url: `/pages/category/index${suffix}`,
+    url: `/pages/category/index?${query.join("&")}`,
   });
 }
 
@@ -47,16 +90,21 @@ function openProductDetail(productId: number) {
   });
 }
 
-function openCartPage() {
-  uni.navigateTo({
-    url: "/pages/cart/index",
-  });
+function handleSearch(keyword: string) {
+  const normalizedKeyword = keyword.trim();
+  if (!normalizedKeyword) {
+    uni.showToast({
+      title: "请输入搜索关键词",
+      icon: "none",
+    });
+    return;
+  }
+
+  openCategoryPage("flash", normalizedKeyword);
 }
 
-function openOrderListPage() {
-  uni.navigateTo({
-    url: "/pages/order/list",
-  });
+function openQrSheet() {
+  qrVisible.value = true;
 }
 
 onLoad(() => {
@@ -69,348 +117,363 @@ onPullDownRefresh(() => {
 </script>
 
 <template>
-  <view class="page">
-    <view class="hero">
-      <text class="hero-kicker">Phase 1 Storefront</text>
-      <text class="hero-title">腕表商城</text>
-      <text class="hero-summary">
-        当前已接入最小交易闭环：浏览商品、加入购物车、提交订单、查看订单。
-      </text>
+  <view class="tech-page home-page">
+    <view class="tech-shell">
+      <view class="tech-nav home-nav tech-fade-up">
+        <view class="tech-nav__side"></view>
 
-      <view class="search-shell" @tap="openCategoryPage()">
-        <text class="search-icon">⌕</text>
-        <text class="search-text">搜索商品名称 / 进入分类浏览</text>
-      </view>
-
-      <view class="hero-actions">
-        <view class="hero-action-card" @tap="openCartPage()">
-          <text class="hero-action-title">购物车</text>
-          <text class="hero-action-text">查看已加购商品并去结算</text>
+        <view class="tech-nav__center">
+          <text class="tech-nav__title">我享造商城</text>
+          <text class="tech-nav__subtitle">NEON FUTURE STORE</text>
         </view>
-        <view class="hero-action-card" @tap="openOrderListPage()">
-          <text class="hero-action-title">我的订单</text>
-          <text class="hero-action-text">查看当前微信登录用户的订单记录</text>
-        </view>
-      </view>
-    </view>
 
-    <view class="section">
-      <view class="section-head">
-        <text class="section-title">分类入口</text>
-        <text class="section-action" @tap="openCategoryPage()">查看全部</text>
-      </view>
-
-      <view v-if="quickCategories.length" class="category-grid">
-        <view
-          v-for="category in quickCategories"
-          :key="category.id"
-          class="category-card"
-          @tap="openCategoryPage(category.id)"
+        <button
+          class="tech-icon-button"
+          hover-class="tech-button-hover"
+          @tap="openQrSheet"
         >
-          <text class="category-name">{{ category.name }}</text>
-          <text class="category-meta">SORT {{ category.sort_order }}</text>
-        </view>
+          QR
+        </button>
       </view>
 
-      <view v-else class="empty-card">
-        <text class="empty-text">暂无可用分类</text>
-      </view>
-    </view>
+      <TechSearchBar
+        v-model="searchKeyword"
+        class="tech-fade-up tech-delay-1"
+        placeholder="搜索主推商品或频道"
+        @submit="handleSearch"
+      />
 
-    <view class="section">
-      <view class="section-head">
-        <text class="section-title">推荐商品</text>
-        <text class="section-note">取前台商品列表前几项作为推荐</text>
-      </view>
-
-      <view v-if="errorMessage && !recommendedProducts.length" class="state-card">
-        <text class="state-title">数据加载失败</text>
-        <text class="state-text">{{ errorMessage }}</text>
-        <button class="state-button" size="mini" @tap="loadHomeData">重新加载</button>
+      <view v-if="loading && !products.length" class="tech-panel tech-panel-pad tech-state-card tech-fade-up tech-delay-2">
+        <text class="tech-state-text">首页内容加载中...</text>
       </view>
 
-      <view v-else-if="loading && !recommendedProducts.length" class="state-card">
-        <text class="state-text">商品数据加载中...</text>
-      </view>
-
-      <view v-else-if="recommendedProducts.length" class="product-list">
-        <view
-          v-for="product in recommendedProducts"
-          :key="product.id"
-          class="product-card"
-          @tap="openProductDetail(product.id)"
+      <view v-else-if="errorMessage && !products.length" class="tech-panel tech-panel-pad tech-state-card tech-fade-up tech-delay-2">
+        <text class="tech-state-title">首页加载失败</text>
+        <text class="tech-state-text">{{ errorMessage }}</text>
+        <button
+          class="tech-button tech-button--ghost tech-mini-button retry-button"
+          hover-class="tech-button-hover"
+          @tap="loadHomeData"
         >
-          <image :src="product.cover_image" class="product-image" mode="aspectFill" />
-          <view class="product-body">
-            <text class="product-category">{{ product.category.name }}</text>
-            <text class="product-name">{{ product.name }}</text>
-            <text v-if="product.subtitle" class="product-subtitle">
-              {{ product.subtitle }}
-            </text>
-            <view class="product-price-row">
-              <text class="product-price">¥{{ formatPrice(product.price) }}</text>
-              <text
-                v-if="hasPrice(product.original_price)"
-                class="product-price-original"
-              >
-                ¥{{ formatPrice(product.original_price) }}
-              </text>
+          重新加载
+        </button>
+      </view>
+
+      <template v-else>
+        <swiper
+          v-if="bannerProducts.length"
+          class="tech-panel home-banner tech-fade-scale tech-delay-2"
+          circular
+          autoplay
+          interval="4200"
+          duration="320"
+          indicator-dots
+          indicator-color="rgba(214, 220, 255, 0.2)"
+          indicator-active-color="#9f8eff"
+        >
+          <swiper-item
+            v-for="(product, index) in bannerProducts"
+            :key="product.id"
+          >
+            <view
+              class="home-banner__slide tech-pressable"
+              hover-class="tech-card-hover"
+              @tap="openProductDetail(product.id)"
+            >
+              <TechImage
+                :src="getBannerImage(product)"
+                :sources="getBannerImages(product)"
+                class="home-banner__image"
+                :label="getBannerTitle(product)"
+                :sub-label="product.category.name"
+                :show-caption="false"
+              />
+
+              <view class="home-banner__overlay"></view>
+
+              <view class="home-banner__copy">
+                <view class="home-banner__topline">
+                  <text class="tech-chip tech-chip--accent">
+                    {{ STOREFRONT_CHANNELS[index % STOREFRONT_CHANNELS.length].heroLabel }}
+                  </text>
+                  <text class="home-banner__badge">
+                    {{ STOREFRONT_CHANNELS[index % STOREFRONT_CHANNELS.length].badge }}
+                  </text>
+                </view>
+
+                <text class="home-banner__title">{{ getBannerTitle(product) }}</text>
+                <text class="home-banner__summary">{{ getBannerSummary(product) }}</text>
+
+                <view class="home-banner__price-row">
+                  <text class="tech-price home-banner__price">¥{{ formatPrice(product.price) }}</text>
+                  <text v-if="hasPrice(product.original_price)" class="tech-price-original">
+                    ¥{{ formatPrice(product.original_price) }}
+                  </text>
+                </view>
+
+                <button
+                  class="tech-button tech-button--primary home-banner__action"
+                  hover-class="tech-button-hover"
+                  @tap.stop="openProductDetail(product.id)"
+                >
+                  立即查看
+                </button>
+              </view>
             </view>
+          </swiper-item>
+        </swiper>
+
+        <view class="home-shortcuts">
+          <view
+            v-for="(channel, index) in STOREFRONT_CHANNELS"
+            :key="channel.key"
+            class="home-shortcuts__item tech-pressable tech-fade-up"
+            :class="`tech-delay-${Math.min(index + 2, 5)}`"
+            hover-class="tech-card-hover"
+            @tap="openCategoryPage(channel.key)"
+          >
+            <view class="home-shortcuts__badge">{{ channel.badge }}</view>
+            <text class="home-shortcuts__title">{{ channel.label }}</text>
+            <text class="home-shortcuts__meta">{{ channel.subtitle }}</text>
           </view>
         </view>
-      </view>
 
-      <view v-else class="empty-card">
-        <text class="empty-text">暂无在售商品</text>
-      </view>
+        <view class="tech-panel tech-panel-pad home-hot tech-fade-up tech-delay-3">
+          <view class="home-section__head">
+            <view>
+              <text class="tech-kicker">近期爆款推荐</text>
+              <text class="home-section__title">只保留 2 个高优先级商品</text>
+            </view>
+            <text class="home-section__link" @tap="openCategoryPage('flash')">查看全部</text>
+          </view>
+
+          <view v-if="hotProducts.length" class="home-hot__grid">
+            <ProductCard
+              v-for="(product, index) in hotProducts"
+              :key="product.id"
+              :product="product"
+              variant="catalog"
+              :stagger-index="index + 1"
+              label="近期爆款"
+              action-label="立即查看"
+              @select="openProductDetail"
+            />
+          </view>
+
+          <view v-else class="tech-panel tech-panel-subtle tech-state-card">
+            <text class="tech-state-title">暂无爆款商品</text>
+            <text class="tech-state-text">当前没有可展示的主推商品。</text>
+          </view>
+        </view>
+      </template>
     </view>
+
+    <WechatQrSheet
+      v-model="qrVisible"
+      title="官方微信二维码"
+      description="首页按钮和弹层已经接通，后续替换成真实微信二维码图片即可。"
+    />
+
+    <TechTabBar active="home" />
   </view>
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding: 28rpx 24rpx 44rpx;
-  color: #2f2619;
+.home-page {
+  padding-bottom: 190rpx;
 }
 
-.hero {
-  padding: 36rpx 32rpx;
-  border-radius: 36rpx;
-  background:
-    linear-gradient(140deg, rgba(255, 249, 239, 0.98), rgba(237, 223, 196, 0.95)),
-    #fff;
-  box-shadow: 0 28rpx 72rpx rgba(105, 79, 34, 0.12);
-}
-
-.hero-kicker {
-  display: block;
-  color: #8d6c2f;
-  font-size: 22rpx;
-  font-weight: 700;
-  letter-spacing: 4rpx;
-  text-transform: uppercase;
-}
-
-.hero-title {
-  display: block;
-  margin-top: 18rpx;
-  font-size: 60rpx;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.hero-summary {
-  display: block;
-  margin-top: 18rpx;
-  color: #645745;
-  font-size: 28rpx;
-  line-height: 1.7;
-}
-
-.search-shell {
-  display: flex;
+.home-nav {
   align-items: center;
-  margin-top: 28rpx;
-  padding: 24rpx 28rpx;
-  border-radius: 999rpx;
-  background: rgba(38, 29, 18, 0.92);
 }
 
-.search-icon {
-  margin-right: 16rpx;
-  color: #f3d7a0;
-  font-size: 30rpx;
+.home-banner {
+  position: relative;
+  min-height: 820rpx;
+  overflow: hidden;
 }
 
-.search-text {
-  color: #f7ecda;
-  font-size: 26rpx;
+.home-banner__slide {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 820rpx;
 }
 
-.hero-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16rpx;
-  margin-top: 22rpx;
+.home-banner__image,
+.home-banner__overlay {
+  position: absolute;
+  inset: 0;
 }
 
-.hero-action-card {
-  padding: 24rpx 22rpx;
-  border-radius: 26rpx;
-  background: rgba(255, 255, 255, 0.68);
+.home-banner__image {
+  width: 100%;
+  height: 100%;
 }
 
-.hero-action-title {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 700;
+.home-banner__overlay {
+  background:
+    radial-gradient(circle at 16% 0%, rgba(189, 118, 255, 0.26), transparent 28%),
+    linear-gradient(180deg, rgba(6, 10, 23, 0.18), rgba(5, 8, 18, 0.18) 34%, rgba(5, 8, 18, 0.76));
 }
 
-.hero-action-text {
-  display: block;
-  margin-top: 10rpx;
-  color: #665946;
-  font-size: 22rpx;
-  line-height: 1.6;
+.home-banner__copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  padding: 40rpx 36rpx 42rpx;
 }
 
-.section {
-  margin-top: 28rpx;
-}
-
-.section-head {
+.home-banner__topline {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20rpx;
-  padding: 0 6rpx;
+  gap: 16rpx;
 }
 
-.section-title {
-  font-size: 34rpx;
-  font-weight: 700;
+.home-banner__badge {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 20rpx;
+  letter-spacing: 4rpx;
+  font-family: var(--tech-font-mono);
 }
 
-.section-action,
-.section-note {
-  color: #8d6c2f;
-  font-size: 24rpx;
-}
-
-.category-grid {
-  display: flex;
-  flex-wrap: wrap;
-  margin: 0 -9rpx;
-}
-
-.category-card {
-  width: calc(50% - 18rpx);
-  margin: 0 9rpx 18rpx;
-  padding: 28rpx 24rpx;
-  border-radius: 28rpx;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 18rpx 44rpx rgba(81, 61, 26, 0.08);
-  box-sizing: border-box;
-}
-
-.category-name {
+.home-banner__title {
   display: block;
-  font-size: 30rpx;
+  max-width: 88%;
+  margin-top: 24rpx;
+  color: #ffffff;
+  font-size: 58rpx;
   font-weight: 700;
+  line-height: 1.08;
 }
 
-.category-meta {
+.home-banner__summary {
   display: block;
-  margin-top: 10rpx;
-  color: #866b43;
-  font-size: 22rpx;
-  letter-spacing: 2rpx;
-}
-
-.product-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.product-card + .product-card {
+  max-width: 84%;
   margin-top: 18rpx;
-}
-
-.product-card {
-  display: flex;
-  overflow: hidden;
-  border-radius: 30rpx;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 18rpx 48rpx rgba(84, 62, 23, 0.09);
-}
-
-.product-image {
-  width: 212rpx;
-  min-width: 212rpx;
-  height: 212rpx;
-  background: #f0e6d7;
-}
-
-.product-body {
-  flex: 1;
-  padding: 24rpx;
-}
-
-.product-category {
-  display: block;
-  color: #8d6c2f;
-  font-size: 22rpx;
-  letter-spacing: 2rpx;
-}
-
-.product-name {
-  display: block;
-  margin-top: 10rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.product-subtitle {
-  display: block;
-  margin-top: 10rpx;
-  color: #6e614e;
-  font-size: 24rpx;
-  line-height: 1.6;
-}
-
-.product-price-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-top: 18rpx;
-}
-
-.product-price {
-  margin-right: 14rpx;
-  color: #20180d;
-  font-size: 34rpx;
-  font-weight: 700;
-}
-
-.product-price-original {
-  color: #9e9280;
-  font-size: 24rpx;
-  text-decoration: line-through;
-}
-
-.empty-card,
-.state-card {
-  padding: 36rpx 28rpx;
-  border-radius: 28rpx;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 18rpx 44rpx rgba(81, 61, 26, 0.07);
-}
-
-.empty-text,
-.state-text {
-  color: #6d604d;
+  color: rgba(225, 229, 255, 0.92);
   font-size: 26rpx;
-  line-height: 1.7;
+  line-height: 1.72;
 }
 
-.state-title {
-  display: block;
-  margin-bottom: 10rpx;
-  font-size: 30rpx;
+.home-banner__price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14rpx;
+  margin-top: 24rpx;
+}
+
+.home-banner__price {
+  font-size: 56rpx;
+}
+
+.home-banner__action {
+  width: 100%;
+  margin-top: 28rpx;
+}
+
+.home-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.home-shortcuts__item {
+  min-height: 238rpx;
+  padding: 24rpx 18rpx 22rpx;
+  border: 1rpx solid rgba(175, 159, 255, 0.14);
+  border-radius: 30rpx;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(170, 100, 255, 0.22), transparent 30%),
+    linear-gradient(180deg, rgba(22, 18, 48, 0.84), rgba(10, 14, 29, 0.9));
+  box-shadow:
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.04),
+    0 18rpx 34rpx rgba(6, 9, 24, 0.2);
+}
+
+.home-shortcuts__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 78rpx;
+  height: 78rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, rgba(122, 94, 255, 0.26), rgba(66, 208, 255, 0.18));
+  color: #f4f7ff;
+  font-size: 26rpx;
   font-weight: 700;
+  letter-spacing: 1rpx;
+  box-shadow: inset 0 0 0 1rpx rgba(188, 177, 255, 0.22);
 }
 
-.state-button {
+.home-shortcuts__title {
+  display: block;
+  margin-top: 22rpx;
+  color: var(--tech-text-primary);
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1.36;
+}
+
+.home-shortcuts__meta {
+  display: block;
+  margin-top: 12rpx;
+  color: var(--tech-text-secondary);
+  font-size: 21rpx;
+  line-height: 1.68;
+}
+
+.home-hot__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+  margin-top: 24rpx;
+}
+
+.home-section__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.home-section__title {
+  display: block;
+  margin-top: 14rpx;
+  color: var(--tech-text-primary);
+  font-size: 38rpx;
+  font-weight: 700;
+  line-height: 1.28;
+}
+
+.home-section__link {
+  color: #b7b9ff;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.retry-button {
   margin-top: 18rpx;
-  color: #20180d;
-  background: #f0d59d;
 }
 
 @media (max-width: 520px) {
-  .hero-actions {
-    grid-template-columns: 1fr;
+  .home-banner__title,
+  .home-banner__summary {
+    max-width: 100%;
+  }
+
+  .home-shortcuts,
+  .home-hot__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-section__head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

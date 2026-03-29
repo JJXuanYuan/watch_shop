@@ -2,54 +2,56 @@
 import { computed, ref } from "vue";
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app";
 
+import ProductCard from "../../components/ProductCard.vue";
+import TechSearchBar from "../../components/TechSearchBar.vue";
 import { fetchCategories, fetchProducts } from "../../api/shop";
-import { formatPrice, hasPrice } from "../../utils/price";
 import type { CategoryItem, ProductListItem } from "../../types/shop";
+import {
+  STOREFRONT_CHANNELS,
+  filterProductsByKeyword,
+  getChannelPageTitle,
+  getChannelProducts,
+  getDefaultChannelKey,
+  getStoreChannelDefinition,
+  resolveChannelCategory,
+  type StoreChannelKey,
+} from "../../utils/storefront";
 
 interface CategoryPageQuery {
-  categoryId?: string;
+  channel?: string;
+  keyword?: string;
 }
 
 const categories = ref<CategoryItem[]>([]);
 const products = ref<ProductListItem[]>([]);
-const selectedCategoryId = ref<number | null>(null);
-const initialCategoryId = ref<number | null>(null);
+const selectedChannelKey = ref<StoreChannelKey>("modeling");
 const loading = ref(false);
-const productLoading = ref(false);
 const errorMessage = ref("");
+const searchKeyword = ref("");
 
-const selectedCategory = computed(() =>
-  categories.value.find((item) => item.id === selectedCategoryId.value) ?? null,
+const currentChannel = computed(() => getStoreChannelDefinition(selectedChannelKey.value));
+const matchedCategory = computed(() =>
+  resolveChannelCategory(selectedChannelKey.value, categories.value),
+);
+const channelProducts = computed(() =>
+  getChannelProducts(selectedChannelKey.value, products.value, categories.value),
+);
+const visibleProducts = computed(() =>
+  filterProductsByKeyword(channelProducts.value, searchKeyword.value),
+);
+const pageTitle = computed(() =>
+  getChannelPageTitle(selectedChannelKey.value, categories.value),
 );
 
-function parseCategoryId(value?: string): number | null {
+function decodeKeyword(value?: string): string {
   if (!value) {
-    return null;
+    return "";
   }
 
-  const numericValue = Number(value);
-  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
-}
-
-async function loadProductsByCategory(categoryId: number) {
-  productLoading.value = true;
-  errorMessage.value = "";
-
   try {
-    const response = await fetchProducts({
-      category_id: categoryId,
-      page: 1,
-      page_size: 20,
-    });
-
-    selectedCategoryId.value = categoryId;
-    products.value = response.items;
-  } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : "商品列表加载失败";
-    products.value = [];
-  } finally {
-    productLoading.value = false;
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
 }
 
@@ -58,41 +60,21 @@ async function loadPageData() {
   errorMessage.value = "";
 
   try {
-    const categoryResponse = await fetchCategories();
+    const [categoryResponse, productResponse] = await Promise.all([
+      fetchCategories(),
+      fetchProducts({ page: 1, page_size: 48 }),
+    ]);
+
     categories.value = categoryResponse.items;
-
-    if (!categories.value.length) {
-      selectedCategoryId.value = null;
-      products.value = [];
-      return;
-    }
-
-    const fallbackCategory = categories.value[0];
-    const matchedCategory = categories.value.find(
-      (item) => item.id === initialCategoryId.value,
-    );
-    const nextCategoryId =
-      matchedCategory?.id ?? selectedCategoryId.value ?? fallbackCategory.id;
-
-    await loadProductsByCategory(nextCategoryId);
+    products.value = productResponse.items;
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : "分类页数据加载失败";
+    errorMessage.value = error instanceof Error ? error.message : "分类商品加载失败";
     categories.value = [];
     products.value = [];
-    selectedCategoryId.value = null;
   } finally {
     loading.value = false;
     uni.stopPullDownRefresh();
   }
-}
-
-function handleCategoryTap(categoryId: number) {
-  if (selectedCategoryId.value === categoryId && products.value.length) {
-    return;
-  }
-
-  void loadProductsByCategory(categoryId);
 }
 
 function openProductDetail(productId: number) {
@@ -101,9 +83,30 @@ function openProductDetail(productId: number) {
   });
 }
 
+function handleBack() {
+  const pages = getCurrentPages();
+  if (pages.length > 1) {
+    uni.navigateBack();
+    return;
+  }
+
+  uni.reLaunch({
+    url: "/pages/index/index",
+  });
+}
+
+function handleChannelChange(channelKey: StoreChannelKey) {
+  selectedChannelKey.value = channelKey;
+}
+
+function handleSearch(keyword: string) {
+  searchKeyword.value = keyword.trim();
+}
+
 onLoad((query) => {
   const pageQuery = (query ?? {}) as CategoryPageQuery;
-  initialCategoryId.value = parseCategoryId(pageQuery.categoryId);
+  selectedChannelKey.value = getDefaultChannelKey(pageQuery.channel);
+  searchKeyword.value = decodeKeyword(pageQuery.keyword);
   void loadPageData();
 });
 
@@ -113,285 +116,215 @@ onPullDownRefresh(() => {
 </script>
 
 <template>
-  <view class="page">
-    <view class="header-card">
-      <text class="header-kicker">Category View</text>
-      <text class="header-title">分类商品浏览</text>
-      <text class="header-summary">
-        默认选中第一个可用分类，点击左侧分类后刷新右侧商品列表。
-      </text>
-    </view>
-
-    <view v-if="errorMessage && !categories.length" class="state-card">
-      <text class="state-title">分类数据加载失败</text>
-      <text class="state-text">{{ errorMessage }}</text>
-      <button class="state-button" size="mini" @tap="loadPageData">重新加载</button>
-    </view>
-
-    <view v-else-if="loading && !categories.length" class="state-card">
-      <text class="state-text">分类数据加载中...</text>
-    </view>
-
-    <view v-else-if="!categories.length" class="state-card">
-      <text class="state-text">暂无启用中的分类</text>
-    </view>
-
-    <view v-else class="catalog-panel">
-      <scroll-view scroll-y class="category-scroll">
-        <view
-          v-for="category in categories"
-          :key="category.id"
-          class="category-item"
-          :class="{ 'category-item--active': category.id === selectedCategoryId }"
-          @tap="handleCategoryTap(category.id)"
+  <view class="tech-page category-page">
+    <view class="tech-shell">
+      <view class="tech-nav category-nav tech-fade-up">
+        <button
+          class="tech-icon-button tech-icon-button--ghost"
+          hover-class="tech-button-hover"
+          @tap="handleBack"
         >
-          <text class="category-item-name">{{ category.name }}</text>
-          <text class="category-item-meta">#{{ category.sort_order }}</text>
+          &lt;
+        </button>
+
+        <view class="tech-nav__center">
+          <text class="tech-nav__title">分类商品页</text>
+          <text class="tech-nav__subtitle">{{ currentChannel.label }}</text>
+        </view>
+
+        <text class="category-nav__badge">{{ currentChannel.badge }}</text>
+      </view>
+
+      <TechSearchBar
+        v-model="searchKeyword"
+        class="tech-fade-up tech-delay-1"
+        :placeholder="currentChannel.searchPlaceholder"
+        @submit="handleSearch"
+      />
+
+      <scroll-view scroll-x class="category-tabs tech-fade-up tech-delay-2" show-scrollbar="false">
+        <view class="category-tabs__inner">
+          <view
+            v-for="channel in STOREFRONT_CHANNELS"
+            :key="channel.key"
+            class="category-tabs__item tech-pressable"
+            :class="{ 'category-tabs__item--active': channel.key === selectedChannelKey }"
+            hover-class="tech-card-hover"
+            @tap="handleChannelChange(channel.key)"
+          >
+            <text class="category-tabs__code">{{ channel.badge }}</text>
+            <text class="category-tabs__label">{{ channel.label }}</text>
+          </view>
         </view>
       </scroll-view>
 
-      <scroll-view scroll-y class="product-scroll">
-        <view class="product-header">
-          <text class="product-header-title">
-            {{ selectedCategory?.name || "分类商品" }}
-          </text>
-          <text class="product-header-summary">
-            {{ productLoading ? "商品列表加载中..." : `共 ${products.length} 件商品` }}
-          </text>
-        </view>
+      <view v-if="loading && !products.length" class="tech-panel tech-panel-pad tech-state-card tech-fade-up tech-delay-3">
+        <text class="tech-state-text">商品列表加载中...</text>
+      </view>
 
-        <view v-if="errorMessage && !productLoading" class="inner-state-card">
-          <text class="state-text">{{ errorMessage }}</text>
-        </view>
+      <view v-else-if="errorMessage && !products.length" class="tech-panel tech-panel-pad tech-state-card tech-fade-up tech-delay-3">
+        <text class="tech-state-title">分类商品加载失败</text>
+        <text class="tech-state-text">{{ errorMessage }}</text>
+        <button
+          class="tech-button tech-button--ghost tech-mini-button retry-button"
+          hover-class="tech-button-hover"
+          @tap="loadPageData"
+        >
+          重新加载
+        </button>
+      </view>
 
-        <view v-else-if="productLoading" class="inner-state-card">
-          <text class="state-text">正在加载商品...</text>
-        </view>
-
-        <view v-else-if="products.length" class="product-list">
-          <view
-            v-for="product in products"
-            :key="product.id"
-            class="product-card"
-            @tap="openProductDetail(product.id)"
-          >
-            <image :src="product.cover_image" class="product-image" mode="aspectFill" />
-            <view class="product-content">
-              <text class="product-name">{{ product.name }}</text>
-              <text v-if="product.subtitle" class="product-subtitle">
-                {{ product.subtitle }}
-              </text>
-              <view class="product-price-row">
-                <text class="product-price">¥{{ formatPrice(product.price) }}</text>
-                <text
-                  v-if="hasPrice(product.original_price)"
-                  class="product-price-original"
-                >
-                  ¥{{ formatPrice(product.original_price) }}
-                </text>
-              </view>
+      <template v-else>
+        <view class="tech-panel tech-panel-pad category-hero tech-fade-up tech-delay-3">
+          <view class="category-hero__head">
+            <view>
+              <text class="tech-kicker">统一承接页</text>
+              <text class="category-hero__title">{{ pageTitle }}</text>
             </view>
+
+            <text class="tech-chip tech-chip--accent">{{ visibleProducts.length }} 款商品</text>
+          </view>
+
+          <text class="category-hero__summary">{{ currentChannel.subtitle }}</text>
+
+          <view class="category-hero__signals">
+            <text v-if="matchedCategory" class="tech-chip tech-chip--muted">
+              映射分类 {{ matchedCategory.name }}
+            </text>
+            <text v-if="searchKeyword" class="tech-chip tech-chip--purple">
+              搜索 {{ searchKeyword }}
+            </text>
           </view>
         </view>
 
-        <view v-else class="inner-state-card">
-          <text class="state-text">当前分类下暂无商品</text>
+        <view v-if="visibleProducts.length" class="category-products">
+          <ProductCard
+            v-for="(product, index) in visibleProducts"
+            :key="product.id"
+            :product="product"
+            variant="catalog"
+            :stagger-index="index + 1"
+            label="分类商品"
+            action-label="查看详情"
+            @select="openProductDetail"
+          />
         </view>
-      </scroll-view>
+
+        <view v-else class="tech-panel tech-panel-pad tech-state-card tech-fade-up tech-delay-4">
+          <text class="tech-state-title">当前条件下暂无商品</text>
+          <text class="tech-state-text">可以切换上方频道，或调整搜索关键词继续查看。</text>
+        </view>
+      </template>
     </view>
   </view>
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding: 24rpx;
-  color: #2f2619;
+.category-page {
+  padding-bottom: 72rpx;
 }
 
-.header-card {
-  padding: 30rpx 28rpx;
-  border-radius: 32rpx;
-  background: rgba(255, 252, 246, 0.94);
-  box-shadow: 0 22rpx 60rpx rgba(90, 68, 29, 0.11);
-}
-
-.header-kicker {
-  display: block;
-  color: #8d6c2f;
-  font-size: 22rpx;
+.category-nav__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78rpx;
+  height: 78rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, rgba(113, 86, 255, 0.24), rgba(74, 203, 255, 0.16));
+  color: #eef2ff;
+  font-size: 24rpx;
   font-weight: 700;
-  letter-spacing: 4rpx;
-  text-transform: uppercase;
+  letter-spacing: 2rpx;
 }
 
-.header-title {
+.category-tabs {
+  width: 100%;
+}
+
+.category-tabs__inner {
+  display: inline-flex;
+  gap: 14rpx;
+  min-width: 100%;
+}
+
+.category-tabs__item {
+  min-width: 164rpx;
+  padding: 18rpx 20rpx;
+  border: 1rpx solid rgba(176, 167, 255, 0.14);
+  border-radius: 28rpx;
+  background:
+    linear-gradient(180deg, rgba(22, 18, 48, 0.8), rgba(9, 14, 30, 0.88));
+}
+
+.category-tabs__item--active {
+  background: linear-gradient(135deg, rgba(104, 87, 255, 0.22), rgba(62, 186, 255, 0.18));
+  box-shadow:
+    inset 0 0 0 1rpx rgba(196, 184, 255, 0.22),
+    0 16rpx 32rpx rgba(8, 11, 28, 0.22);
+}
+
+.category-tabs__code {
   display: block;
-  margin-top: 14rpx;
-  font-size: 46rpx;
-  font-weight: 700;
+  color: var(--tech-text-tertiary);
+  font-size: 18rpx;
+  letter-spacing: 3rpx;
+  font-family: var(--tech-font-mono);
 }
 
-.header-summary {
+.category-tabs__label {
   display: block;
-  margin-top: 12rpx;
-  color: #665946;
-  font-size: 26rpx;
-  line-height: 1.7;
-}
-
-.catalog-panel {
-  display: flex;
-  height: calc(100vh - 320rpx);
-  margin-top: 24rpx;
-}
-
-.category-scroll,
-.product-scroll {
-  border-radius: 30rpx;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 18rpx 44rpx rgba(81, 61, 26, 0.08);
-}
-
-.category-scroll {
-  width: 208rpx;
-  margin-right: 20rpx;
-}
-
-.product-scroll {
-  flex: 1;
-  padding: 24rpx;
-  box-sizing: border-box;
-}
-
-.category-item {
-  padding: 26rpx 20rpx;
-  border-bottom: 1rpx solid rgba(141, 108, 47, 0.08);
-}
-
-.category-item--active {
-  background: linear-gradient(180deg, rgba(240, 213, 157, 0.46), rgba(255, 248, 236, 0.9));
-}
-
-.category-item-name {
-  display: block;
+  margin-top: 10rpx;
+  color: var(--tech-text-primary);
   font-size: 28rpx;
   font-weight: 700;
-  line-height: 1.5;
 }
 
-.category-item-meta {
+.category-hero__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.category-hero__title {
   display: block;
-  margin-top: 8rpx;
-  color: #8a7554;
-  font-size: 22rpx;
-}
-
-.product-header {
-  margin-bottom: 20rpx;
-}
-
-.product-header-title {
-  display: block;
-  font-size: 34rpx;
+  margin-top: 14rpx;
+  color: var(--tech-text-primary);
+  font-size: 40rpx;
   font-weight: 700;
+  line-height: 1.26;
 }
 
-.product-header-summary {
+.category-hero__summary {
   display: block;
-  margin-top: 10rpx;
-  color: #7d6f59;
-  font-size: 24rpx;
+  margin-top: 18rpx;
+  color: var(--tech-text-secondary);
+  font-size: 25rpx;
+  line-height: 1.74;
 }
 
-.product-list {
+.category-hero__signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 22rpx;
+}
+
+.category-products {
   display: flex;
   flex-direction: column;
+  gap: 18rpx;
 }
 
-.product-card + .product-card {
+.retry-button {
   margin-top: 18rpx;
 }
 
-.product-card {
-  overflow: hidden;
-  border-radius: 24rpx;
-  background: #fbf8f3;
-}
-
-.product-image {
-  width: 100%;
-  height: 250rpx;
-  background: #efe4d2;
-}
-
-.product-content {
-  padding: 22rpx 22rpx 24rpx;
-}
-
-.product-name {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-.product-subtitle {
-  display: block;
-  margin-top: 10rpx;
-  color: #6d604c;
-  font-size: 24rpx;
-  line-height: 1.6;
-}
-
-.product-price-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-top: 18rpx;
-}
-
-.product-price {
-  margin-right: 12rpx;
-  color: #20180d;
-  font-size: 32rpx;
-  font-weight: 700;
-}
-
-.product-price-original {
-  color: #9d907d;
-  font-size: 24rpx;
-  text-decoration: line-through;
-}
-
-.state-card,
-.inner-state-card {
-  padding: 32rpx 28rpx;
-  border-radius: 28rpx;
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 18rpx 44rpx rgba(81, 61, 26, 0.07);
-}
-
-.state-card {
-  margin-top: 24rpx;
-}
-
-.state-title {
-  display: block;
-  margin-bottom: 10rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-}
-
-.state-text {
-  color: #6d604d;
-  font-size: 26rpx;
-  line-height: 1.7;
-}
-
-.state-button {
-  margin-top: 18rpx;
-  color: #20180d;
-  background: #f0d59d;
+@media (max-width: 520px) {
+  .category-hero__head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

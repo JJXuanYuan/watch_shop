@@ -18,9 +18,11 @@ export default {
 <style>
 page {
   min-height: 100%;
+  color: #f7f9ff;
   background:
-    radial-gradient(circle at top left, rgba(211, 169, 82, 0.26), transparent 28%),
-    linear-gradient(180deg, #f5efe4 0%, #efe5d4 100%);
-  font-family: "Source Han Sans SC", "Noto Sans SC", sans-serif;
+    radial-gradient(circle at 16% -6%, rgba(161, 112, 255, 0.3), transparent 30%),
+    radial-gradient(circle at 84% 0%, rgba(70, 211, 255, 0.16), transparent 24%),
+    linear-gradient(180deg, #070813 0%, #0a1023 46%, #050711 100%);
+  font-family: "Avenir Next", "PingFang SC", "Helvetica Neue", "Source Han Sans SC", sans-serif;
 }
 </style>
